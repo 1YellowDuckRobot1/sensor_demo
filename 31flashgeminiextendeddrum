@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Learn to Play: Drum Machine</title>
+  <style>
+    /* --- CSS SECTION ---
+      This section styles the page. We use a dark theme and CSS Flexbox 
+      to center everything and make it look like a real instrument.
+    */
+    :root {
+      --primary-color: #ffc600;
+      --bg-color: #1a1a2e;
+      --pad-color: #16213e;
+    }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      margin-top: 40px;
+      color: var(--primary-color);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    /* The 'keys' container uses Flexbox to line up the drum pads horizontally.
+      flex-wrap: wrap ensures they wrap to the next line on small screens.
+    */
+    .keys {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      margin: 40px 0;
+      max-width: 800px;
+    }
+
+    /* Styling for the individual drum pads. 
+      Notice the 'transition' property: this is what allows the pad to smoothly 
+      return to its normal state after being struck.
+    */
+    .key {
+      border: 4px solid #0f3460;
+      border-radius: 10px;
+      background: var(--pad-color);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+      margin: 1rem;
+      font-size: 1.5rem;
+      padding: 1rem .5rem;
+      transition: all 0.07s ease;
+      width: 100px;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* The '.playing' class is added by JavaScript when a key is pressed.
+      It makes the button grow slightly (scale), changes the border color, 
+      and adds a glowing shadow effect.
+    */
+    .playing {
+      transform: scale(1.1);
+      border-color: var(--primary-color);
+      box-shadow: 0 0 20px var(--primary-color);
+    }
+
+    kbd {
+      display: block;
+      font-size: 40px;
+      font-weight: bold;
+    }
+
+    .sound {
+      font-size: 1.2rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--primary-color);
+    }
+
+    /* Lesson Section Styling */
+    .lesson-board {
+      background: #0f3460;
+      padding: 20px 40px;
+      border-radius: 10px;
+      margin-bottom: 40px;
+      max-width: 600px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+    .lesson-board h2 {
+      margin-top: 0;
+      color: var(--primary-color);
+      border-bottom: 2px solid var(--primary-color);
+      padding-bottom: 10px;
+    }
+
+    .beat-grid {
+      display: grid;
+      grid-template-columns: auto 1fr 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+      text-align: center;
+      align-items: center;
+    }
+
+    .beat-header { font-weight: bold; color: var(--primary-color); }
+    .beat-cell { background: #16213e; padding: 10px; border-radius: 5px; }
+    .active-beat { background: var(--primary-color); color: #000; font-weight: bold; }
+
+  </style>
+</head>
+<body>
+
+  <h1>Interactive Drum Machine</h1>
+
+  <div class="keys">
+    <div data-key="81" class="key"><kbd>Q</kbd><span class="sound">clap</span></div>
+    <div data-key="87" class="key"><kbd>W</kbd><span class="sound">hihat</span></div>
+    <div data-key="69" class="key"><kbd>E</kbd><span class="sound">kick</span></div>
+    <div data-key="65" class="key"><kbd>A</kbd><span class="sound">openhat</span></div>
+    <div data-key="83" class="key"><kbd>S</kbd><span class="sound">boom</span></div>
+    <div data-key="68" class="key"><kbd>D</kbd><span class="sound">ride</span></div>
+    <div data-key="90" class="key"><kbd>Z</kbd><span class="sound">snare</span></div>
+    <div data-key="88" class="key"><kbd>X</kbd><span class="sound">tom</span></div>
+    <div data-key="67" class="key"><kbd>C</kbd><span class="sound">tink</span></div>
+  </div>
+
+  <audio data-key="81" src="https://raw.githubusercontent.com/wesbos/JavaScript30/master/01%20-%20JavaScript%20Drum%20Kit/sounds/clap.wav"></audio>
+  <audio data-key="87" src="https://raw.githubusercontent.com/wesbos/JavaScript30/master/01%20-%20JavaScript%20Drum%20Kit/sounds/hihat.wav"></audio>
+  <audio data-key="69" src="https://raw.githubusercontent.com/wesbos/JavaScript30/master/01%20-%20JavaScript%20Drum%20Kit/sounds/kick.wav"></audio>
+  <audio data-key="65" src="https://
