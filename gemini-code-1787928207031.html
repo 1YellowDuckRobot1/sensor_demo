@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pixel Lake Fishing</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 4px solid #334155;
+    }
+    canvas { display: block; background: #1e293b; cursor: pointer; }
+    .instructions {
+      margin-top: 12px;
+      color: #94a3b8;
+      font-size: 0.9rem;
+      text-align: center;
+    }
+    kbd {
+      background: #334155;
+      color: #f8fafc;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="canvas" width="800" height="500"></canvas>
+</div>
+<div class="instructions">
+  Click or press <kbd>Space</kbd> to cast. Hold click/<kbd>Space</kbd> during reeling to raise the catch bar!
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// --- GAME SPECIES DATA ---
+const FISH_TYPES = [
+  { name: 'Minnow', color: '#94a3b8', size: 12, rarity: 0.4, speed: 1.2, barSize: 35, points: 50 },
+  { name: 'Bluegill', color: '#38bdf8', size: 16, rarity: 0.3, speed: 1.8, barSize: 30, points: 120 },
+  { name: 'Bass', color: '#4ade80', size: 22, rarity: 0.18, speed: 2.3, barSize: 25, points: 250 },
+  { name: 'Salmon', color: '#fb7185', size: 26, rarity: 0.09, speed: 3.0, barSize: 20, points: 500 },
+  { name: 'Golden Trout', color: '#facc15', size: 30, rarity: 0.03, speed: 4.0, barSize: 16, points: 1200 }
+];
+
+// --- GAME STATE VARIABLES ---
+const STATE = { IDLE: 0, CAST: 1, WAITING: 2, BITE: 3, REELING: 4, RESULT: 5 };
+let currentState = STATE.IDLE;
+
+let score = 0;
+let highScore = localStorage.getItem('fish_highscore') || 0;
+let message = 'Click to Cast!';
+let messageColor = '#ffffff';
+
+// Bobber & Line
+let bobber = { x: 550, y: 320, targetY: 320, vy: 0 };
+let lineAlpha = 0;
+
+// Reel Minigame state (0 to 100 scale)
+let reelProgress = 30; // 0 to 100
+let catchBarPos = 50;  // center of green box (0 to 100)
+let catchBarVel = 0;
+let targetFishPos = 50;
+let targetFishVel = 0;
+let currentTargetFish = null;
+let biteTimer = 0;
+let resultTimer = 0;
+
+// Input control
+let isHoldingAction = false;
+
+// Decorative ambient fishes
+const ambientFishes = Array.from({ length: 6 }, () => ({
+  x: Math.random() * 700 + 50,
+  y: Math.random() * 150 + 320,
+  speed: (Math.random() * 0.8 + 0.3) * (Math.random() < 0.5 ? 1 : -1),
+  size: Math.random() * 6 + 6
+}));
+
+// --- INPUT HANDLERS ---
+function onActionStart() {
+  isHoldingAction = true;
+  if (currentState === STATE.IDLE) {
+    castLine();
+  } else if (currentState === STATE.BITE) {
+    startReeling();
+  } else if (currentState === STATE.RESULT && resultTimer <= 0) {
+    resetToIdle();
+  }
+}
+
+function onActionEnd() {
+  isHoldingAction = false;
+}
+
+window.addEventListener('mousedown', onActionStart);
+window.addEventListener('mouseup', onActionEnd);
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !e.repeat) onActionStart();
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') onActionEnd();
+});
+
+// --- GAME MECHANICS ---
+function castLine() {
+  currentState = STATE.CAST;
+  message = 'Casting...';
+  messageColor = '#cbd5e1';
+  bobber.x = 520 + Math.random() * 160;
+  bobber.y = 220;
+  bobber.targetY = 320;
+}
+
+function triggerBite() {
+  currentState = STATE.BITE;
+  message = 'HOOKED! CLICK FAST!';
+  messageColor = '#facc15';
+  
+  // Pick random fish based on weighted rarity
+  const rand = Math.random();
+  let cumulative = 0;
+  currentTargetFish = FISH_TYPES[0];
+  for (let fish of FISH_TYPES) {
+    cumulative += fish.rarity;
+    if (rand <= cumulative) {
+      currentTargetFish = fish;
+      break;
+    }
+  }
+
+  biteTimer = 90; // Frames allowed to hook (1.5 seconds)
+}
+
+function startReeling() {
+  currentState = STATE.REELING;
+  message = 'Keep the fish in the zone!';
+  messageColor = '#38bdf8';
+  reelProgress = 35;
+  catchBarPos = 50;
+  catchBarVel = 0;
+  targetFishPos = 50;
+  targetFishVel = 0;
+}
+
+function resetToIdle() {
+  currentState = STATE.IDLE;
+  message = 'Click to Cast!';
+  messageColor = '#ffffff';
+}
+
+// --- UPDATE LOOP ---
+function update() {
+  // Ambient background fishes
+  ambientFishes.forEach(f => {
+    f.x += f.speed;
+    if (f.x > 820) f.x = -20;
+    if (f.x < -20) f.x = 820;
+  });
+
+  // State Updates
+  if (currentState === STATE.CAST) {
+    bobber.y += (bobber.targetY - bobber.y) * 0.1;
+    if (Math.abs(bobber.y - bobber.targetY) < 2) {
+      currentState = STATE.WAITING;
+      message = 'Waiting for a bite...';
+      biteTimer = Math.floor(Math.random() * 180) + 120; // 2-5 seconds
+    }
+  } else if (currentState === STATE.WAITING) {
+    biteTimer--;
+    bobber.y = 320 + Math.sin(Date.now() / 300) * 3; // Floating animation
+    if (biteTimer <= 0) {
+      triggerBite();
+    }
+  } else if (currentState === STATE.BITE) {
+    biteTimer--;
+    bobber.y = 326 + Math.sin(Date.now() / 50) * 5; // Urgent bobbing
+    if (biteTimer <= 0) {
+      currentState = STATE.RESULT;
+      message = 'The fish got away!';
+      messageColor = '#ef4444';
+      resultTimer = 60;
+    }
+  } else if (currentState === STATE.REELING) {
+    // 1. Update Green Catch Bar (Physics)
+    if (isHoldingAction) {
+      catchBarVel += 0.5; // Lift up
+    } else {
+      catchBarVel -= 0.4; // Gravity down
+    }
+    catchBarVel *= 0.88; // Friction
+    catchBarPos += catchBarVel;
+
+    // Bounce on bounds
+    if (catchBarPos < 0) { catchBarPos = 0; catchBarVel = 0; }
+    if (catchBarPos > 100) { catchBarPos = 100; catchBarVel = 0; }
+
+    // 2. Update Fish AI Movement inside meter
+    targetFishVel += (Math.random() - 0.5) * currentTargetFish.speed;
+    targetFishVel *= 0.9;
+    targetFishPos += targetFishVel;
+
+    if (targetFishPos < 5) { targetFishPos = 5; targetFishVel *= -1; }
+    if (targetFishPos > 95) { targetFishPos = 95; targetFishVel *= -1; }
+
+    // 3. Check Collision (Is fish inside green bar zone?)
+    const barHalf = currentTargetFish.barSize / 2;
+    const inRange = Math.abs(targetFishPos - catchBarPos) <= barHalf;
+
+    if (inRange) {
+      reelProgress += 0.45;
+    } else {
+      reelProgress -= 0.35;
+    }
+
+    // Win/Lose Check
+    if (reelProgress >= 100) {
+      currentState = STATE.RESULT;
+      score += currentTargetFish.points;
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('fish_highscore', highScore);
+      }
+      message = `Caught a ${currentTargetFish.name}! +${currentTargetFish.points} pts`;
+      messageColor = '#4ade80';
+      resultTimer = 90;
+    } else if (reelProgress <= 0) {
+      currentState = STATE.RESULT;
+      message = `${currentTargetFish.name} snapped the line!`;
+      messageColor = '#ef4444';
+      resultTimer = 90;
+    }
+  } else if (currentState === STATE.RESULT) {
+    if (resultTimer > 0) resultTimer--;
+  }
+}
+
+// --- DRAW LOOP ---
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // 1. Sky & Sun
+  const skyGradient = ctx.createLinearGradient(0, 0, 0, 280);
+  skyGradient.addColorStop(0, '#0284c7');
+  skyGradient.addColorStop(1, '#bae6fd');
+  ctx.fillStyle = skyGradient;
+  ctx.fillRect(0, 0, canvas.width, 280);
+
+  ctx.fillStyle = '#fef08a';
+  ctx.beginPath();
+  ctx.arc(680, 70, 35, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Water Environment
+  const waterGradient = ctx.createLinearGradient(0, 280, 0, canvas.height);
+  waterGradient.addColorStop(0, '#0284c7');
+  waterGradient.addColorStop(1, '#0c4a6e');
+  ctx.fillStyle = waterGradient;
+  ctx.fillRect(0, 280, canvas.width, canvas.height - 280);
+
+  // Water Surface Line
+  ctx.strokeStyle = '#7dd3fc';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, 280);
+  ctx.lineTo(canvas.width, 280);
+  ctx.stroke();
+
+  // Ambient Swimming Fish
+  ambientFishes.forEach(f => {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.beginPath();
+    ctx.ellipse(f.x, f.y, f.size, f.size / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // 3. Dock & Fisherman
+  // Dock
+  ctx.fillStyle = '#78350f';
+  ctx.fillRect(0, 240, 160, 20);
+  ctx.fillRect(30, 260, 16, 100);
+  ctx.fillRect(110, 260, 16, 100);
+
+  // Fisherman Silhouette
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(80, 180, 24, 60); // Body
+  ctx.beginPath();               // Head
+  ctx.arc(92, 170, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Fishing Rod
+  ctx.strokeStyle = '#d97706';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(96, 200);
+  ctx.lineTo(220, 140);
+  ctx.stroke();
+
+  // Fishing Line
+  if (currentState !== STATE.IDLE) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(220, 140);
+    ctx.lineTo(bobber.x, bobber.y);
+    ctx.stroke();
+
+    // Bobber
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(bobber.x, bobber.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(bobber.x, bobber.y + 3, 6, 0, Math.PI);
+    ctx.fill();
+  }
+
+  // 4. Scoreboard Overlay
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.6)';
+  ctx.fillRect(16, 16, 200, 64);
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(16, 16, 200, 64);
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillText(`SCORE: ${score}`, 30, 42);
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(`BEST: ${highScore}`, 30, 64);
+
+  // Status Banner Message
+  ctx.fillStyle = messageColor;
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(message, canvas.width / 2, 60);
+  ctx.textAlign = 'left'; // Reset
+
+  // 5. Minigame HUD (Tension Meter when REELING)
+  if (currentState === STATE.REELING) {
+    const meterX = 700;
+    const meterY = 100;
+    const meterW = 36;
+    const meterH = 300;
+
+    // Meter Background Frame
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+    ctx.fillRect(meterX - 10, meterY - 10, meterW + 20, meterH + 20);
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(meterX - 10, meterY - 10, meterW + 20, meterH + 20);
+
+    // Track Background
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(meterX, meterY, meterW, meterH);
+
+    // Green Catch Box Zone
+    const barH = (currentTargetFish.barSize / 100) * meterH;
+    const barY = meterY + meterH - (catchBarPos / 100) * meterH - (barH / 2);
+    
+    ctx.fillStyle = 'rgba(74, 222, 128, 0.4)';
+    ctx.fillRect(meterX, Math.max(meterY, Math.min(meterY + meterH - barH, barY)), meterW, barH);
+    ctx.strokeStyle = '#4ade80';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(meterX, Math.max(meterY, Math.min(meterY + meterH - barH, barY)), meterW, barH);
+
+    // Fish Target Indicator inside meter
+    const fishY = meterY + meterH - (targetFishPos / 100) * meterH;
+    ctx.fillStyle = currentTargetFish.color;
+    ctx.beginPath();
+    ctx.arc(meterX + meterW / 2, fishY, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Progress Bar (Side)
+    const progBarW = 10;
+    const progH = (reelProgress / 100) * meterH;
+    ctx.fillStyle = '#334155';
+    ctx.fillRect(meterX - 25, meterY, progBarW, meterH);
+    ctx.fillStyle = reelProgress > 50 ? '#4ade80' : '#facc15';
+    ctx.fillRect(meterX - 25, meterY + meterH - progH, progBarW, progH);
+  }
+}
+
+// --- MAIN LOOP ---
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
