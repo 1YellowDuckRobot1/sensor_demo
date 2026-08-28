@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Synth & Beat Lab</title>
+  <style>
+    :root {
+      --bg: #12131c;
+      --card: #1c1e2d;
+      --accent: #ff2a6d;
+      --highlight: #05d9e8;
+      --text: #e0e6ed;
+      --step-off: #2a2d42;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+      margin: 0;
+    }
+    .container {
+      max-width: 800px;
+      width: 100%;
+      background: var(--card);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    h1 { margin-top: 0; color: var(--highlight); font-size: 1.8rem; }
+    .controls {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      margin-bottom: 24px;
+      background: rgba(0,0,0,0.2);
+      padding: 16px;
+      border-radius: 8px;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+    .grid { display: flex; flex-direction: column; gap: 12px; }
+    .track { display: flex; align-items: center; gap: 12px; }
+    .inst-btn {
+      width: 90px;
+      background: #2a2d42;
+      border: 1px solid var(--highlight);
+      color: var(--text);
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      text-align: center;
+    }
+    .inst-btn:hover { background: var(--highlight); color: #000; }
+    .steps { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; flex: 1; }
+    .step {
+      aspect-ratio: 1;
+      background: var(--step-off);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .step.active { background: var(--accent); }
+    .step.playing { border: 2px solid var(--highlight); transform: scale(0.95); }
+    .edu-card {
+      margin-top: 24px;
+      padding: 16px;
+      background: rgba(5, 217, 232, 0.05);
+      border-left: 4px solid var(--highlight);
+      border-radius: 4px;
+    }
+    .edu-card h3 { margin-top: 0; color: var(--highlight); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Interactive Drum Machine & Sound Physics Lab</h1>
+  
+  <div class="controls">
+    <button id="playBtn">Play / Pause</button>
+    <label>
+      BPM: <span id="bpmVal">120</span>
+      <input type="range" id="bpm" min="60" max="180" value="120">
+    </label>
+  </div>
+
+  <div class="grid" id="sequencer"></div>
+
+  <div class="edu-card">
+    <h3 id="eduTitle">Click an Instrument Name to Learn How It's Made</h3>
+    <p id="eduBody">Click any step square to add a beat, or click the instrument buttons on the left (Kick, Snare, Hi-Hat, Tom) to inspect how software synthesizes real drum physics using raw math and sound waves.</p>
+  </div>
+</div>
+
+<script>
+  let audioCtx = null;
+  let isPlaying = false;
+  let currentStep = 0;
+  let bpm = 120;
+  let timerId = null;
+
+  const instruments = [
+    { name: 'Kick', desc: 'Synthesized via a Sine Wave Oscillator rapid frequency drop (150Hz to 0.01Hz in 0.5s) combined with a fast exponential volume drop to mimic a heavy bass drum skin impact.' },
+    { name: 'Snare', desc: 'Combines two sounds: white noise passed through a High-Pass Filter (simulating the metallic wires rattling underneath) mixed with a short tone burst (simulating the drum shell).' },
+    { name: 'Hi-Hat', desc: 'Created using pure White Noise filtered through a high-frequency band-pass filter (~7000Hz) with an extremely brief volume envelope (0.05s) to produce a crisp metallic click.' },
+    { name: 'Tom', desc: 'Similar to the Kick, but starting at a lower initial pitch shift (120Hz to 30Hz) with a medium decay length to create a resonant wooden drum body sound.' }
+  ];
+
+  const gridData = Array(4).fill(null).map(() => Array(8).fill(false));
+
+  function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  // Audio Synthesis Generators
+  function playSound(type, time) {
+    if (!audioCtx) return;
+
+    if (type === 0) { // Kick
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.setValueAtTime(150, time);
+      osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5);
+      gain.gain.setValueAtTime(1, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.5);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(time);
+      osc.stop(time + 0.5);
+    } 
+    else if (type === 1) { // Snare
+      // Noise
+      const bufferSize = audioCtx.sampleRate * 0.2;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 1000;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.8, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      noise.start(time);
+
+      // Shell tone
+      const osc = audioCtx.createOscillator();
+      const oscGain = audioCtx.createGain();
+      osc.frequency.setValueAtTime(180, time);
+      osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.1);
+      oscGain.gain.setValueAtTime(0.5, time);
+      oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+      osc.connect(oscGain);
+      oscGain.connect(audioCtx.destination);
+      osc.start(time);
+      osc.stop(time + 0.1);
+    } 
+    else if (type === 2) { // Hi-Hat
+      const bufferSize = audioCtx.sampleRate * 0.05;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 7000;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.6, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      noise.start(time);
+    } 
+    else if (type === 3) { // Tom
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.setValueAtTime(120, time);
+      osc.frequency.exponentialRampToValueAtTime(30, time + 0.3);
+      gain.gain.setValueAtTime(1, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.3);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(time);
+      osc.stop(time + 0.3);
+    }
+  }
+
+  // Render Sequencer UI
+  const seqContainer = document.getElementById('sequencer');
+  instruments.forEach((inst, r) => {
+    const track = document.createElement('div');
+    track.className = 'track';
+
+    const btn = document.createElement('button');
+    btn.className = 'inst-btn';
+    btn.innerText = inst.name;
+    btn.onclick = () => {
+      initAudio();
+      playSound(r, audioCtx.currentTime);
+      document.getElementById('eduTitle').innerText = `${inst.name} Physics & Synthesis`;
+      document.getElementById('eduBody').innerText = inst.desc;
+    };
+    track.appendChild(btn);
+
+    const stepsDiv = document.createElement('div');
+    stepsDiv.className = 'steps';
+    for (let c = 0; c < 8; c++) {
+      const step = document.createElement('div');
+      step.className = 'step';
+      step.dataset.row = r;
+      step.dataset.col = c;
+      step.onclick = () => {
+        gridData[r][c] = !gridData[r][c];
+        step.classList.toggle('active', gridData[r][c]);
+      };
+      stepsDiv.appendChild(step);
+    }
+    track.appendChild(stepsDiv);
+    seqContainer.appendChild(track);
+  });
+
+  // Loop & Step Timing
+  function nextStep() {
+    const interval = (60 / bpm / 2) * 1000; // 8th notes
+    const allSteps = document.querySelectorAll('.step');
+    
+    allSteps.forEach(s => s.classList.remove('playing'));
+
+    for (let r = 0; r < 4; r++) {
+      const stepEl = document.querySelector(`.step[data-row="${r}"][data-col="${currentStep}"]`);
+      if (stepEl) stepEl.classList.add('playing');
+      if (gridData[r][currentStep]) {
+        playSound(r, audioCtx.currentTime);
+      }
+    }
+    currentStep = (currentStep + 1) % 8;
+    timerId = setTimeout(nextStep, interval);
+  }
+
+  // Event Listeners
+  document.getElementById('playBtn').onclick = () => {
+    initAudio();
+    isPlaying = !isPlaying;
+    if (isPlaying) {
+      currentStep = 0;
+      nextStep();
+    } else {
+      clearTimeout(timerId);
+      document.querySelectorAll('.step').forEach(s => s.classList.remove('playing'));
+    }
+  };
+
+  document.getElementById('bpm').oninput = (e) => {
+    bpm = e.target.value;
+    document.getElementById('bpmVal').innerText = bpm;
+  };
+</script>
+</body>
+</html>
